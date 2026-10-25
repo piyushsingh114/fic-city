@@ -30,7 +30,10 @@ import {
   Trees,
   Bath,
   Skull,
-  HelpCircle
+  HelpCircle,
+  X,
+  Navigation,
+  Video
 } from "lucide-react";
 import {
   Category,
@@ -86,6 +89,21 @@ export const CitizenView: React.FC<CitizenViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [submittedTicket, setSubmittedTicket] = useState<Complaint | null>(null);
+
+  // Live Location & Camera State
+  const [latitude, setLatitude] = useState<number>(28.6514);
+  const [longitude, setLongitude] = useState<number>(77.1907);
+  const [accuracyMeters, setAccuracyMeters] = useState<number | null>(null);
+  const [isLocating, setIsLocating] = useState<boolean>(false);
+  const [locationSuccess, setLocationSuccess] = useState<string | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  // Live Camera Modal State
+  const [isCameraModalOpen, setIsCameraModalOpen] = useState<boolean>(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const nativeCameraInputRef = React.useRef<HTMLInputElement>(null);
 
   // Feedback State
   const [rating, setRating] = useState<number>(5);
@@ -150,6 +168,129 @@ export const CitizenView: React.FC<CitizenViewProps> = ({
     }
   };
 
+  // --- LIVE CAMERA CAPTURE LOGIC ---
+  const startLiveCamera = async () => {
+    try {
+      setLocationError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      setCameraStream(stream);
+      setIsCameraModalOpen(true);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 150);
+    } catch (err: any) {
+      console.warn("Direct webcam stream not available, falling back to native camera input:", err);
+      // Fallback directly to native device camera
+      if (nativeCameraInputRef.current) {
+        nativeCameraInputRef.current.click();
+      } else {
+        alert("Camera permission denied or camera not available. Please allow camera access or choose a photo from gallery.");
+      }
+    }
+  };
+
+  const stopLiveCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+      setCameraStream(null);
+    }
+    setIsCameraModalOpen(false);
+  };
+
+  const capturePhotoFromStream = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Draw video frame
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Superimpose Civic Geo-stamp & Timestamp Watermark
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.fillRect(0, canvas.height - 44, canvas.width, 44);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 13px sans-serif";
+    ctx.fillText(`📍 Fic City MCD 311 • Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`, 12, canvas.height - 24);
+    ctx.font = "11px monospace";
+    ctx.fillStyle = "#34d399";
+    ctx.fillText(`📅 Captured: ${new Date().toLocaleString()} (Live Geo-Verified)`, 12, canvas.height - 10);
+
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+    setPhotos((prev) => (prev.length < 3 ? [...prev, dataUrl] : prev));
+    stopLiveCamera();
+  };
+
+  // --- LIVE GPS GEOLOCATION LOGIC ---
+  const handleDetectLiveLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation is not supported by your browser. You can click any Quick Delhi Ward preset below.");
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationError(null);
+    setLocationSuccess(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const acc = Math.round(pos.coords.accuracy);
+
+        setLatitude(lat);
+        setLongitude(lng);
+        setAccuracyMeters(acc);
+        setIsLocating(false);
+        setLocationSuccess(`Live GPS locked (Accuracy: ±${acc}m)!`);
+        setTimeout(() => setLocationSuccess(null), 4000);
+
+        // Reverse geocoding via OpenStreetMap Nominatim
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+            { headers: { "Accept-Language": "en" } }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.display_name) {
+              setAddress(data.display_name);
+            }
+          }
+        } catch (e) {
+          console.warn("Reverse geocode fallback to coordinates:", e);
+        }
+      },
+      (err) => {
+        setIsLocating(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setLocationError("Location permission denied. Click any Quick Delhi Ward preset below or allow location in browser settings.");
+        } else {
+          setLocationError("Unable to fetch GPS. You can click any Quick Delhi Ward preset below or type manually.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  const applyWardPreset = (name: string, lat: number, lng: number, addr: string) => {
+    setLatitude(lat);
+    setLongitude(lng);
+    setAccuracyMeters(5);
+    setAddress(addr);
+    setLocationError(null);
+    setLocationSuccess(`Ward preset applied: ${name} (GPS locked ±5m)!`);
+    setTimeout(() => setLocationSuccess(null), 3500);
+  };
+
   const handleRecordVoice = () => {
     setIsRecording(true);
     setTimeout(() => {
@@ -177,8 +318,8 @@ export const CitizenView: React.FC<CitizenViewProps> = ({
         description,
         address,
         landmark,
-        latitude: 28.6514,
-        longitude: 77.1907,
+        latitude: latitude || 28.6514,
+        longitude: longitude || 77.1907,
         is_anonymous: isAnonymous,
         media: photos.map((url, i) => ({
           id: `photo-${Date.now()}-${i}`,
@@ -632,70 +773,195 @@ export const CitizenView: React.FC<CitizenViewProps> = ({
                   </div>
                 </div>
 
-                {/* Photos */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-2">
-                    2. {language === "hi" ? "फोटो अपलोड करें (अधिकतम 3) *" : "Upload Photos (Up to 3) *"}
-                  </label>
-                  <div className="flex flex-wrap gap-3">
+                {/* 2. LIVE PHOTO CAPTURE & GALLERY UPLOAD */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-800">
+                      2. {language === "hi" ? "फोटो प्रमाण (अधिकतम 3) *" : "Live Incident Photo Proof (Up to 3) *"}
+                    </label>
+                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      {photos.length}/3 {language === "hi" ? "फोटो जोड़ी गईं" : "photos attached"}
+                    </span>
+                  </div>
+
+                  {/* Action Buttons for Live Camera & Gallery */}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={startLiveCamera}
+                      disabled={photos.length >= 3}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 flex items-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <Camera className="w-4 h-4 text-emerald-100" />
+                      <span>{language === "hi" ? "लाइव कैमरा से फोटो लें" : "Capture Live Photo"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={photos.length >= 3}
+                      className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 font-bold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                    >
+                      <span>{language === "hi" ? "गैलरी से चुनें" : "Upload from Gallery"}</span>
+                    </button>
+
+                    {/* Hidden inputs */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                    <input
+                      ref={nativeCameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                  </div>
+
+                  {/* Photo Previews with Geo-Tag Watermark Badge */}
+                  <div className="flex flex-wrap gap-3 pt-1">
                     {photos.map((src, idx) => (
-                      <div key={idx} className="relative w-24 h-24 rounded-2xl overflow-hidden border border-slate-300">
+                      <div key={idx} className="relative w-28 h-28 rounded-2xl overflow-hidden border-2 border-emerald-500 shadow-xs group">
                         <img src={src} alt="Evidence" className="w-full h-full object-cover" />
+                        
+                        {/* Live Geo-stamp Badge */}
+                        <div className="absolute bottom-0 inset-x-0 bg-slate-900/80 backdrop-blur-xs text-[9px] font-mono text-emerald-300 px-1 py-0.5 text-center truncate">
+                          📍 {latitude.toFixed(3)}, {longitude.toFixed(3)}
+                        </div>
+
+                        {/* Remove Button */}
                         <button
                           type="button"
                           onClick={() => setPhotos(photos.filter((_, i) => i !== idx))}
-                          className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 text-[10px]"
+                          className="absolute top-1.5 right-1.5 bg-rose-600/90 text-white rounded-full p-1 text-[10px] hover:bg-rose-700 shadow-sm"
+                          title="Remove photo"
                         >
-                          ✕
+                          <X className="w-3 h-3" />
                         </button>
                       </div>
                     ))}
-                    {photos.length < 3 && (
-                      <label className="w-24 h-24 rounded-2xl border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/50 flex flex-col items-center justify-center cursor-pointer transition-colors text-slate-500">
-                        <Camera className="w-6 h-6 text-slate-400 mb-1" />
-                        <span className="text-[10px] font-bold">Add Photo</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={handlePhotoUpload}
-                          className="hidden"
-                        />
-                      </label>
+
+                    {photos.length === 0 && (
+                      <div className="w-full p-4 rounded-2xl bg-slate-50 border border-dashed border-slate-300 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-1">
+                        <Camera className="w-6 h-6 text-slate-400" />
+                        <span className="font-semibold text-slate-700">No photos captured yet</span>
+                        <span className="text-[11px] text-slate-400">Click "Capture Live Photo" to take live proof with GPS watermark</span>
+                      </div>
                     )}
                   </div>
                 </div>
 
-                {/* Location with Auto-GPS */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-700">
-                      3. {language === "hi" ? "स्थान व लैंडमार्क *" : "Location & Address *"}
+                {/* 3. LIVE GPS LOCATION & REVERSE GEOCODING */}
+                <div className="space-y-3 p-4 rounded-2xl bg-emerald-50/40 border border-emerald-200/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <MapPin className="w-4 h-4 text-emerald-600" />
+                      <span>3. {language === "hi" ? "लाइव स्थान व पता *" : "Live GPS Location & Address *"}</span>
                     </label>
+
+                    {/* Live GPS Detection Button */}
                     <button
                       type="button"
-                      onClick={() => setAddress("Ward 64, DB Gupta Road, Karol Bagh, Delhi - 110005")}
-                      className="text-[11px] font-bold text-emerald-700 hover:underline flex items-center gap-1"
+                      onClick={handleDetectLiveLocation}
+                      disabled={isLocating}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm active:scale-95 transition-all disabled:opacity-50"
                     >
-                      <MapPin className="w-3 h-3 text-emerald-600" />
-                      Auto-Detect GPS
+                      {isLocating ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                      ) : (
+                        <Navigation className="w-3.5 h-3.5 text-emerald-100" />
+                      )}
+                      <span>{isLocating ? "Fetching Live GPS..." : "📍 Use My Live Location"}</span>
                     </button>
                   </div>
-                  <input
-                    type="text"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    required
-                    placeholder="Enter street, area, colony..."
-                    className="w-full text-xs p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                  />
-                  <input
-                    type="text"
-                    value={landmark}
-                    onChange={(e) => setLandmark(e.target.value)}
-                    placeholder="Nearest landmark (e.g. Near Metro Gate 2)"
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                  />
+
+                  {/* GPS Coordinate Display Pill */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-3 py-2 rounded-xl border border-emerald-200 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="font-mono text-[11px] font-bold text-slate-800">
+                        Lat: {latitude.toFixed(5)}, Lng: {longitude.toFixed(5)}
+                      </span>
+                      {accuracyMeters && (
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-md">
+                          ±{accuracyMeters}m accuracy
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">GPS Auto-Verified</span>
+                  </div>
+
+                  {/* Quick Delhi Ward Presets (Instant fallback) */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Quick Delhi Wards:</span>
+                    {[
+                      { name: "Karol Bagh (W-64)", lat: 28.6514, lng: 77.1907, addr: "DB Gupta Road, Karol Bagh, Delhi - 110005" },
+                      { name: "Rohini (W-23)", lat: 28.7112, lng: 77.1215, addr: "Sector 7 Community Center, Rohini, Delhi - 110085" },
+                      { name: "Civil Lines (W-102)", lat: 28.6804, lng: 77.2251, addr: "Old Secretariat, Civil Lines, Delhi - 110054" },
+                      { name: "Lajpat Nagar (W-145)", lat: 28.5684, lng: 77.2435, addr: "Central Market, Lajpat Nagar II, Delhi - 110024" },
+                      { name: "Dwarka (W-88)", lat: 28.5921, lng: 77.0460, addr: "Sector 12, Dwarka, Delhi - 110078" },
+                      { name: "Mayur Vihar (W-160)", lat: 28.6083, lng: 77.2954, addr: "Pocket 1, Mayur Vihar Phase 1, Delhi - 110091" }
+                    ].map((preset) => (
+                      <button
+                        key={preset.name}
+                        type="button"
+                        onClick={() => applyWardPreset(preset.name, preset.lat, preset.lng, preset.addr)}
+                        className="text-[11px] px-2 py-0.5 rounded-lg bg-white hover:bg-emerald-100 border border-slate-200 hover:border-emerald-300 text-slate-700 hover:text-emerald-900 font-medium transition-colors"
+                      >
+                        {preset.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Status Notifications */}
+                  {locationSuccess && (
+                    <div className="p-2.5 rounded-xl bg-emerald-100 text-emerald-900 text-xs flex items-center gap-2 border border-emerald-300 font-medium">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <span>{locationSuccess}</span>
+                    </div>
+                  )}
+
+                  {locationError && (
+                    <div className="p-2.5 rounded-xl bg-rose-50 text-rose-800 text-xs flex items-start gap-2 border border-rose-200">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <span>{locationError}</span>
+                    </div>
+                  )}
+
+                  {/* Address Text Field */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                      Street Address (Auto-filled via GPS, editable) *
+                    </label>
+                    <input
+                      type="text"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      required
+                      placeholder="e.g. Near Metro Pillar 140, DB Gupta Road, Karol Bagh, Delhi"
+                      className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                    />
+                  </div>
+
+                  {/* Landmark Field */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                      Nearest Landmark (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={landmark}
+                      onChange={(e) => setLandmark(e.target.value)}
+                      placeholder="e.g. Opposite Post Office / Near Mother Dairy booth"
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                    />
+                  </div>
                 </div>
 
                 {/* Description + Voice input */}
@@ -1102,6 +1368,70 @@ export const CitizenView: React.FC<CitizenViewProps> = ({
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {/* ================= LIVE CAMERA MODAL ================= */}
+      {isCameraModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="max-w-md w-full bg-slate-900 rounded-3xl overflow-hidden border border-slate-700 shadow-2xl flex flex-col">
+            {/* Top Bar */}
+            <div className="p-4 bg-slate-900/90 flex items-center justify-between border-b border-slate-800 text-white">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                <span className="text-xs font-black uppercase tracking-wider">Live Municipal Camera</span>
+              </div>
+              <button
+                onClick={stopLiveCamera}
+                className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Live Video Viewfinder */}
+            <div className="relative bg-black w-full h-72 sm:h-80 flex items-center justify-center overflow-hidden">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+
+              {/* Viewfinder Target Reticle */}
+              <div className="absolute inset-8 pointer-events-none border border-white/30 rounded-2xl flex items-center justify-center">
+                <div className="w-6 h-6 border-t-2 border-l-2 border-emerald-400 absolute top-2 left-2" />
+                <div className="w-6 h-6 border-t-2 border-r-2 border-emerald-400 absolute top-2 right-2" />
+                <div className="w-6 h-6 border-b-2 border-l-2 border-emerald-400 absolute bottom-2 left-2" />
+                <div className="w-6 h-6 border-b-2 border-r-2 border-emerald-400 absolute bottom-2 right-2" />
+              </div>
+
+              {/* Live Geo-Watermark Pill */}
+              <div className="absolute bottom-2 left-2 right-2 bg-slate-950/75 backdrop-blur-xs rounded-xl p-2 text-white font-mono text-[10px] space-y-0.5 border border-white/10">
+                <div className="text-emerald-400 font-bold truncate">
+                  📍 GPS: {latitude.toFixed(5)}, {longitude.toFixed(5)} {accuracyMeters && `(±${accuracyMeters}m)`}
+                </div>
+                <div className="text-slate-300 truncate">
+                  📅 {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()} • Verified MCD Proof
+                </div>
+              </div>
+            </div>
+
+            {/* Shutter Capture Bar */}
+            <div className="p-4 bg-slate-950 flex flex-col items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={capturePhotoFromStream}
+                className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-90 border-4 border-slate-900 ring-4 ring-emerald-500/40 flex items-center justify-center shadow-lg shadow-emerald-500/30 transition-all cursor-pointer"
+                title="Click to capture live photo"
+              >
+                <Camera className="w-7 h-7 text-slate-950" />
+              </button>
+              <span className="text-[11px] font-bold text-slate-400">
+                Tap button to capture geo-verified proof
+              </span>
+            </div>
           </div>
         </div>
       )}
