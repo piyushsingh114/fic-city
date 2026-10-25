@@ -1,4 +1,4 @@
-export type UserRole = 'CITIZEN' | 'FIELD_OFFICER' | 'SUPERVISOR' | 'DEPT_ADMIN' | 'SUPER_ADMIN';
+export type EmployeeRole = 'SUPER_ADMIN' | 'DEPT_HEAD' | 'JE' | 'FIELD_STAFF';
 
 export type ComplaintStatus = 'SUBMITTED' | 'ASSIGNED' | 'IN_PROGRESS' | 'RESOLVED' | 'REJECTED' | 'REOPENED';
 
@@ -9,12 +9,35 @@ export interface User {
   phone_number: string;
   full_name: string;
   email?: string;
-  role: UserRole;
-  preferred_language: 'en' | 'hi';
   ward_id?: string;
-  designation?: string;
+  preferred_language?: 'en' | 'hi';
+  created_at?: string;
+}
+
+export interface Employee {
+  id: string;
+  employee_id: string; // e.g. MCD-ADMIN-001, JE-SAN-1044
+  full_name: string;
+  email: string;
+  phone_number: string;
+  role: EmployeeRole;
   department_id?: string;
-  employee_id?: string;
+  ward_id?: string;
+  designation: string;
+  is_locked?: boolean;
+  must_change_password?: boolean;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface ActivityLog {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  action: string;
+  complaint_id?: string;
+  details: string;
+  timestamp: string;
 }
 
 export interface Ward {
@@ -92,16 +115,22 @@ export interface Complaint {
   ward_id: string;
   ward_name: string;
   zone_name: string;
-  assigned_officer_id: string | null;
+  assigned_employee_id?: string | null;
   officer_name: string;
-  officer_phone: string | null;
+  officer_phone?: string | null;
   title: string;
   description: string;
   voice_note_url?: string | null;
+  
+  // Live Location & Reverse Geocoded Address
   latitude: number;
   longitude: number;
   address: string;
+  house_flat_no?: string;
   landmark?: string;
+  location_accuracy_meters?: number;
+  location_captured_at?: string;
+  
   is_anonymous: boolean;
   status: ComplaintStatus;
   priority: Priority;

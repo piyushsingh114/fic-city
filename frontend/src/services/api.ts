@@ -1,25 +1,109 @@
-import { Complaint, Category, Ward, Announcement, AdminStats, User } from "../types";
+import { Complaint, Category, Ward, Announcement, AdminStats, User, Employee, ActivityLog } from "../types";
 import { clientDb } from "./clientDb";
 
 const API_BASE = "/api";
 
-async function safeFetch<T>(url: string, options?: RequestInit, fallback?: () => T): Promise<T> {
+async function safeFetch<T>(url: string, options?: RequestInit, fallback?: () => T | Promise<T>): Promise<T> {
   try {
     const res = await fetch(url, options);
-    // If not successful or content-type is not JSON (e.g. Vercel returning index.html)
     const contentType = res.headers.get("content-type");
     if (!res.ok || !contentType || !contentType.includes("application/json")) {
-      if (fallback) return fallback();
+      if (fallback) return await fallback();
       throw new Error(`HTTP error ${res.status}`);
     }
     const data = await res.json();
     return data.data;
   } catch (err) {
-    if (fallback) return fallback();
+    if (fallback) return await fallback();
     throw err;
   }
 }
 
+// ============================================================================
+// CITIZEN AUTH APIS
+// ============================================================================
+export async function registerCitizenApi(payload: {
+  full_name: string;
+  phone_number: string;
+  email?: string;
+  password: string;
+  ward_id?: string;
+}): Promise<{ user: User; token: string }> {
+  return safeFetch(
+    `${API_BASE}/auth/register`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    () => clientDb.registerCitizen(payload)
+  );
+}
+
+export async function loginCitizenApi(payload: {
+  identifier: string;
+  password: string;
+}): Promise<{ user: User; token: string }> {
+  return safeFetch(
+    `${API_BASE}/auth/login`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    () => clientDb.loginCitizen(payload)
+  );
+}
+
+// ============================================================================
+// EMPLOYEE & ADMIN AUTH APIS
+// ============================================================================
+export async function loginEmployeeApi(payload: {
+  employee_id: string;
+  password: string;
+}): Promise<{ employee: Employee; token: string }> {
+  return safeFetch(
+    `${API_BASE}/admin/login`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    () => clientDb.loginEmployee(payload)
+  );
+}
+
+export async function fetchEmployeesApi(): Promise<Employee[]> {
+  return safeFetch(
+    `${API_BASE}/admin/employees`,
+    undefined,
+    () => clientDb.getEmployees()
+  );
+}
+
+export async function createEmployeeApi(payload: Partial<Employee> & { password?: string }): Promise<Employee> {
+  return safeFetch(
+    `${API_BASE}/admin/employees`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    () => clientDb.createEmployee(payload)
+  );
+}
+
+export async function fetchActivityLogsApi(): Promise<ActivityLog[]> {
+  return safeFetch(
+    `${API_BASE}/admin/activity-logs`,
+    undefined,
+    () => clientDb.getActivityLogs()
+  );
+}
+
+// ============================================================================
+// METADATA APIS
+// ============================================================================
 export async function fetchCategories(): Promise<Category[]> {
   return safeFetch(
     `${API_BASE}/categories`,
@@ -56,6 +140,9 @@ export async function createAnnouncement(payload: { title: string; message: stri
   );
 }
 
+// ============================================================================
+// COMPLAINT APIS
+// ============================================================================
 export async function fetchComplaints(params?: Record<string, string>): Promise<Complaint[]> {
   const query = params ? `?${new URLSearchParams(params).toString()}` : "";
   return safeFetch(
@@ -171,6 +258,9 @@ export async function addComment(id: string, text: string, user_name: string) {
   );
 }
 
+// ============================================================================
+// CHATBOT & ADMIN STATS
+// ============================================================================
 export async function sendChatMessage(payload: {
   user_id?: string;
   message?: string;
@@ -185,27 +275,6 @@ export async function sendChatMessage(payload: {
       body: JSON.stringify(payload)
     },
     () => clientDb.processChatMessage(payload.message || "", payload.user_id)
-  );
-}
-
-export async function fetchFAQs() {
-  return safeFetch(
-    `${API_BASE}/chatbot/faqs`,
-    undefined,
-    () => [
-      {
-        question_en: "How do I report a civic problem in Fic City?",
-        answer_en: "Click '+ Report Issue' on the home screen or use the AI Assistant. Select category, upload photos, confirm GPS, and submit."
-      },
-      {
-        question_en: "What is the standard SLA resolution time?",
-        answer_en: "Emergency manholes & wires: 4 hours. Garbage dumps: 12-24 hours. Potholes & streetlights: 24-48 hours."
-      },
-      {
-        question_en: "What is the 'Me Too' Upvote feature?",
-        answer_en: "Instead of filing duplicate complaints for the same pothole or garbage dump, tap 'Me Too' on nearby issues to boost priority."
-      }
-    ]
   );
 }
 
@@ -228,18 +297,10 @@ export async function assignOfficer(complaint_id: string, officer_id: string): P
     () => {
       const c = clientDb.getComplaintById(complaint_id);
       if (!c) throw new Error("Complaint not found");
-      const off = clientDb.getOfficers().find(o => o.id === officer_id) || clientDb.getOfficers()[0];
-      c.assigned_officer_id = off.id;
-      c.officer_name = `${off.full_name} (${off.designation})`;
+      const emp = clientDb.getEmployees().find(o => o.id === officer_id) || clientDb.getEmployees()[0];
+      c.assigned_employee_id = emp.id;
+      c.officer_name = `${emp.full_name} (${emp.designation})`;
       return c;
     }
-  );
-}
-
-export async function fetchOfficers(): Promise<User[]> {
-  return safeFetch(
-    `${API_BASE}/auth/users`,
-    undefined,
-    () => clientDb.getOfficers()
   );
 }
