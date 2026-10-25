@@ -1,0 +1,122 @@
+[
+  {
+    "name": "create_complaint",
+    "description": "Creates a new civic complaint in Fic City after gathering category, description, and location from citizen.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "category_id": {
+          "type": "string",
+          "description": "Category ID e.g. cat-1 (Garbage), cat-2 (Pothole), cat-3 (Streetlight), cat-4 (Drainage)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Short title describing the problem"
+        },
+        "description": {
+          "type": "string",
+          "description": "Full description of the civic problem"
+        },
+        "address": {
+          "type": "string",
+          "description": "Street address, area, or landmark in Delhi"
+        },
+        "latitude": {
+          "type": "number",
+          "description": "GPS latitude coordinate"
+        },
+        "longitude": {
+          "type": "number",
+          "description": "GPS longitude coordinate"
+        },
+        "is_anonymous": {
+          "type": "boolean",
+          "description": "Whether to hide citizen phone number from public view"
+        }
+      },
+      "required": ["category_id", "title", "address"]
+    }
+  },
+  {
+    "name": "get_complaint_status",
+    "description": "Retrieves live status, assigned officer, resolution photo proof, and SLA deadline for a complaint.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "complaint_id": {
+          "type": "string",
+          "description": "Ticket ID e.g. FC-2026-000101 or UUID"
+        }
+      },
+      "required": ["complaint_id"]
+    }
+  },
+  {
+    "name": "search_nearby_complaints",
+    "description": "Finds existing active complaints in the citizen's neighborhood to avoid filing duplicate tickets and offer 'Me Too' upvote.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "description": "User current latitude"
+        },
+        "longitude": {
+          "type": "number",
+          "description": "User current longitude"
+        },
+        "radius_meters": {
+          "type": "integer",
+          "description": "Search radius in meters (default 500)"
+        }
+      },
+      "required": ["latitude", "longitude"]
+    }
+  },
+  {
+    "name": "escalate_complaint",
+    "description": "Escalates an overdue or delayed complaint to the Zonal Municipal Commissioner.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "complaint_id": {
+          "type": "string",
+          "description": "Complaint ID to escalate"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason for escalation"
+        }
+      },
+      "required": ["complaint_id"]
+    }
+  },
+  {
+    "name": "get_ward_info",
+    "description": "Looks up Municipal Ward number, Councillor name, contact phone, and zonal office.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ward_number_or_name": {
+          "type": "string",
+          "description": "Ward number (e.g. 64) or locality name (e.g. Karol Bagh)"
+        }
+      },
+      "required": ["ward_number_or_name"]
+    }
+  },
+  {
+    "name": "search_faq",
+    "description": "RAG search across municipal bylaws, SLAs, helpline numbers, and grievance policies.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Citizen question"
+        }
+      },
+      "required": ["query"]
+    }
+  }
+]

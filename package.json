@@ -1,0 +1,14 @@
+{
+  "name": "fic-city",
+  "version": "1.0.0",
+  "description": "Fic City - Civic Complaint & Municipal Resolution System (MCD 311)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node start-dev.js",
+    "dev": "node start-dev.js",
+    "backend": "cd backend && npm start",
+    "frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build"
+  }
+}
