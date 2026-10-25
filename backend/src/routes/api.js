@@ -2,13 +2,10 @@ import express from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import jwt from "jsonwebtoken";
 import { dbStore } from "../data/dbStore.js";
 import { aiChatbotService } from "../services/aiChatbotService.js";
-import { authenticateCitizen, authenticateEmployee, requireRole } from "../middleware/rbacMiddleware.js";
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || "fic-city-mcd-secret-key-2026";
 
 // Ensure upload directory exists
 const uploadDir = path.resolve("uploads");
@@ -16,7 +13,7 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer storage for complaint photos & proof
+// Multer storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -27,62 +24,14 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ============================================================================
-// 1. CITIZEN AUTHENTICATION
+// 1. AUTHENTICATION & USERS
 // ============================================================================
-router.post("/auth/register", (req, res) => {
-  try {
-    const { full_name, phone_number, email, password, ward_id } = req.body;
-    if (!full_name || !phone_number || !password) {
-      return res.status(400).json({ success: false, message: "Full name, phone number, and password are required." });
-    }
-
-    const user = dbStore.registerCitizen({ full_name, phone_number, email, password, ward_id });
-    const token = jwt.sign(
-      { id: user.id, role: "CITIZEN", phone_number: user.phone_number },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.status(201).json({
-      success: true,
-      message: "Registration successful.",
-      data: { user, token }
-    });
-  } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
-  }
-});
-
-router.post("/auth/login", (req, res) => {
-  try {
-    const { identifier, password } = req.body;
-    if (!identifier || !password) {
-      return res.status(400).json({ success: false, message: "Please provide mobile number/email and password." });
-    }
-
-    const user = dbStore.loginCitizen({ identifier, password });
-    const token = jwt.sign(
-      { id: user.id, role: "CITIZEN", phone_number: user.phone_number },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({
-      success: true,
-      message: "Login successful.",
-      data: { user, token }
-    });
-  } catch (err) {
-    res.status(401).json({ success: false, message: err.message });
-  }
-});
-
-// Legacy OTP endpoints for mobile SMS compatibility
 router.post("/auth/send-otp", (req, res) => {
   const { phone_number } = req.body;
   if (!phone_number) {
     return res.status(400).json({ success: false, message: "Phone number required" });
   }
+  // In demo/dev mode, OTP is always 123456
   return res.json({
     success: true,
     message: "OTP sent successfully to " + phone_number,
@@ -91,26 +40,34 @@ router.post("/auth/send-otp", (req, res) => {
 });
 
 router.post("/auth/verify-otp", (req, res) => {
-  const { phone_number, otp } = req.body;
+  const { phone_number, otp, role = "CITIZEN" } = req.body;
+  
   if (otp !== "123456" && otp !== "000000") {
     return res.status(400).json({ success: false, message: "Invalid OTP. Use 123456 for demo." });
   }
 
+  // Find or create user
   let user = dbStore.users.find(u => u.phone_number === phone_number);
   if (!user) {
     user = {
       id: `user-${Date.now()}`,
       phone_number,
-      full_name: "Citizen User",
-      role: "CITIZEN",
+      full_name: role === "CITIZEN" ? "Citizen User" : "Officer User",
+      role: role,
       preferred_language: "en",
       created_at: new Date().toISOString()
     };
     dbStore.users.push(user);
   }
 
-  const token = jwt.sign({ id: user.id, role: "CITIZEN" }, JWT_SECRET, { expiresIn: "7d" });
-  return res.json({ success: true, token, user });
+  // Simulated JWT Token
+  const token = `jwt_fic_city_${user.id}_${Date.now()}`;
+
+  return res.json({
+    success: true,
+    token,
+    user
+  });
 });
 
 router.get("/auth/users", (req, res) => {
@@ -118,60 +75,7 @@ router.get("/auth/users", (req, res) => {
 });
 
 // ============================================================================
-// 2. MUNICIPAL EMPLOYEE & ADMIN AUTHENTICATION (RBAC)
-// ============================================================================
-router.post("/admin/login", (req, res) => {
-  try {
-    const { employee_id, password } = req.body;
-    const ip_address = req.ip || req.connection?.remoteAddress || "127.0.0.1";
-
-    if (!employee_id || !password) {
-      return res.status(400).json({ success: false, message: "Employee ID and password are required." });
-    }
-
-    const employee = dbStore.loginEmployee({ employee_id, password, ip_address });
-    const token = jwt.sign(
-      {
-        id: employee.id,
-        employee_id: employee.employee_id,
-        role: employee.role,
-        department_id: employee.department_id,
-        ward_id: employee.ward_id
-      },
-      JWT_SECRET,
-      { expiresIn: "12h" } // Short expiry for municipal security
-    );
-
-    res.json({
-      success: true,
-      message: "Staff authentication successful.",
-      data: { employee, token }
-    });
-  } catch (err) {
-    res.status(401).json({ success: false, message: err.message });
-  }
-});
-
-router.get("/admin/employees", authenticateEmployee, requireRole("SUPER_ADMIN", "DEPT_HEAD"), (req, res) => {
-  res.json({ success: true, data: dbStore.getEmployees() });
-});
-
-router.post("/admin/employees", authenticateEmployee, requireRole("SUPER_ADMIN"), (req, res) => {
-  try {
-    const creator = req.employee;
-    const newEmp = dbStore.createEmployee(req.body, creator);
-    res.status(201).json({ success: true, data: newEmp });
-  } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
-  }
-});
-
-router.get("/admin/activity-logs", authenticateEmployee, requireRole("SUPER_ADMIN", "DEPT_HEAD"), (req, res) => {
-  res.json({ success: true, data: dbStore.getActivityLogs() });
-});
-
-// ============================================================================
-// 3. COMPLAINTS & TRACKING
+// 2. COMPLAINTS & TRACKING
 // ============================================================================
 router.get("/complaints", (req, res) => {
   const list = dbStore.getComplaints(req.query);
@@ -181,7 +85,7 @@ router.get("/complaints", (req, res) => {
 router.get("/complaints/nearby", (req, res) => {
   const lat = parseFloat(req.query.lat) || 28.6514;
   const lng = parseFloat(req.query.lng) || 77.1907;
-  const radius = parseInt(req.query.radius, 10) || 1000;
+  const radius = parseInt(req.query.radius, 10) || 1000; // 1km default
   const nearby = dbStore.getNearbyComplaints(lat, lng, radius);
   res.json({ success: true, count: nearby.length, data: nearby });
 });
@@ -197,6 +101,7 @@ router.get("/complaints/:id", (req, res) => {
 router.post("/complaints", (req, res) => {
   try {
     const complaint = dbStore.createComplaint(req.body);
+    // Broadcast via socket.io if attached
     if (req.app.get("io")) {
       req.app.get("io").emit("complaint:new", complaint);
     }
@@ -212,16 +117,6 @@ router.post("/complaints/:id/status", (req, res) => {
   if (!updated) {
     return res.status(404).json({ success: false, message: "Complaint not found" });
   }
-
-  // Audit log the status change
-  dbStore.logActivity(
-    officer_id || "emp-system",
-    "Staff Officer",
-    "STATUS_UPDATE",
-    updated.id,
-    `Status updated to ${status}. Remarks: ${remarks || "None"}`
-  );
-
   if (req.app.get("io")) {
     req.app.get("io").emit("complaint:updated", updated);
   }
@@ -282,7 +177,7 @@ router.post("/complaints/:id/comment", (req, res) => {
 });
 
 // ============================================================================
-// 4. MASTER METADATA (CATEGORIES, WARDS, DEPARTMENTS, ANNOUNCEMENTS)
+// 3. MASTER METADATA (CATEGORIES, WARDS, DEPARTMENTS, ANNOUNCEMENTS)
 // ============================================================================
 router.get("/categories", (req, res) => {
   res.json({ success: true, data: dbStore.categories });
@@ -320,7 +215,7 @@ router.post("/announcements", (req, res) => {
 });
 
 // ============================================================================
-// 5. AI CHATBOT ASSISTANT
+// 4. AI CHATBOT ASSISTANT
 // ============================================================================
 router.post("/chatbot/message", async (req, res) => {
   try {
@@ -344,8 +239,21 @@ router.get("/chatbot/faqs", (req, res) => {
   res.json({ success: true, data: dbStore.faqs });
 });
 
+router.post("/chatbot/faqs", (req, res) => {
+  const { question_en, question_hi, answer_en, answer_hi } = req.body;
+  const newFaq = {
+    id: `faq-${Date.now()}`,
+    question_en,
+    question_hi,
+    answer_en,
+    answer_hi
+  };
+  dbStore.faqs.push(newFaq);
+  res.status(201).json({ success: true, data: newFaq });
+});
+
 // ============================================================================
-// 6. ADMIN ANALYTICS & TRIAGE
+// 5. ADMIN ANALYTICS & TRIAGE
 // ============================================================================
 router.get("/admin/stats", (req, res) => {
   const stats = dbStore.getAdminStats();
@@ -355,7 +263,7 @@ router.get("/admin/stats", (req, res) => {
 router.post("/admin/assign", (req, res) => {
   const { complaint_id, officer_id } = req.body;
   const complaint = dbStore.getComplaintById(complaint_id);
-  const officer = dbStore.employees.find(e => e.id === officer_id) || dbStore.users.find(u => u.id === officer_id);
+  const officer = dbStore.users.find(u => u.id === officer_id);
   if (!complaint || !officer) {
     return res.status(404).json({ success: false, message: "Complaint or officer not found" });
   }
@@ -368,15 +276,6 @@ router.post("/admin/assign", (req, res) => {
     timestamp: new Date().toISOString(),
     remarks: `Reassigned to ${officer.full_name} by Administrator`
   });
-
-  dbStore.logActivity(
-    "emp-admin-1",
-    "Administrator",
-    "REASSIGN",
-    complaint.id,
-    `Reassigned complaint #${complaint.complaint_number} to ${officer.full_name}`
-  );
-
   if (req.app.get("io")) {
     req.app.get("io").emit("complaint:updated", complaint);
   }
@@ -396,7 +295,7 @@ router.get("/admin/export-csv", (req, res) => {
 });
 
 // ============================================================================
-// 7. PHOTO / MEDIA UPLOAD
+// 6. PHOTO / MEDIA UPLOAD
 // ============================================================================
 router.post("/upload", upload.single("media"), (req, res) => {
   if (!req.file) {

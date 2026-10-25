@@ -1,82 +1,12 @@
-import { Complaint, Category, Ward, Announcement, User, Employee, ActivityLog, AdminStats } from "../types";
-import { initialCategories, initialWards, initialComplaints, initialAnnouncements } from "../data/mockData";
-
-export const defaultEmployees: Employee[] = [
-  {
-    id: "emp-super-1",
-    employee_id: "MCD-ADMIN-001",
-    full_name: "Dr. Priya Malhotra, IAS",
-    email: "commissioner@mcd.delhi.gov.in",
-    phone_number: "9876543213",
-    role: "SUPER_ADMIN",
-    designation: "Additional Municipal Commissioner",
-    is_active: true,
-    must_change_password: false
-  },
-  {
-    id: "emp-head-san",
-    employee_id: "DEPT-SAN-01",
-    full_name: "Shri O.P. Meena",
-    email: "head.sanitation@mcd.delhi.gov.in",
-    phone_number: "9876543214",
-    role: "DEPT_HEAD",
-    department_id: "dept-1",
-    designation: "Chief Engineer (Sanitation)",
-    is_active: true
-  },
-  {
-    id: "emp-je-1",
-    employee_id: "MCD-SAN-1044",
-    full_name: "Rajesh Verma",
-    email: "rajesh.verma@mcd.delhi.gov.in",
-    phone_number: "9876543211",
-    role: "JE",
-    department_id: "dept-1",
-    ward_id: "ward-64",
-    designation: "Junior Engineer (Ward 64 - Karol Bagh)",
-    is_active: true
-  },
-  {
-    id: "emp-je-2",
-    employee_id: "MCD-PWD-0892",
-    full_name: "Suresh Yadav",
-    email: "suresh.yadav@mcd.delhi.gov.in",
-    phone_number: "9876543212",
-    role: "JE",
-    department_id: "dept-2",
-    ward_id: "ward-23",
-    designation: "Junior Engineer (Ward 23 - Rohini)",
-    is_active: true
-  }
-];
-
-export const defaultUsers: User[] = [
-  {
-    id: "user-cit-1",
-    phone_number: "9876543210",
-    full_name: "Amit Sharma",
-    email: "amit.sharma@example.com",
-    ward_id: "ward-64",
-    created_at: new Date().toISOString()
-  },
-  {
-    id: "user-cit-2",
-    phone_number: "9876543220",
-    full_name: "Pooja Malhotra",
-    email: "pooja.m@example.com",
-    ward_id: "ward-23",
-    created_at: new Date().toISOString()
-  }
-];
+import { Complaint, Category, Ward, Announcement, User, AdminStats } from "../types";
+import { initialCategories, initialWards, initialComplaints, initialAnnouncements, initialOfficers } from "../data/mockData";
 
 class ClientDatabase {
   private categories: Category[];
   private wards: Ward[];
   private complaints: Complaint[];
   private announcements: Announcement[];
-  private users: User[];
-  private employees: Employee[];
-  private activityLogs: ActivityLog[];
+  private officers: User[];
   private nextTicketIndex: number = 105;
 
   constructor() {
@@ -84,18 +14,7 @@ class ClientDatabase {
     this.wards = this.loadFromStorage("fic_wards", initialWards);
     this.complaints = this.loadFromStorage("fic_complaints", initialComplaints);
     this.announcements = this.loadFromStorage("fic_announcements", initialAnnouncements);
-    this.users = this.loadFromStorage("fic_users_list", defaultUsers);
-    this.employees = this.loadFromStorage("fic_employees_list", defaultEmployees);
-    this.activityLogs = this.loadFromStorage("fic_activity_logs", [
-      {
-        id: "log-1",
-        employee_id: "emp-super-1",
-        employee_name: "Dr. Priya Malhotra, IAS",
-        action: "SYSTEM_INIT",
-        details: "MCD 311 Municipal Grievance portal initialized with 6 Delhi Wards",
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString()
-      }
-    ]);
+    this.officers = this.loadFromStorage("fic_officers", initialOfficers);
   }
 
   private loadFromStorage<T>(key: string, fallback: T): T {
@@ -103,7 +22,7 @@ class ClientDatabase {
       const stored = localStorage.getItem(key);
       if (stored) return JSON.parse(stored);
     } catch (e) {
-      console.warn(`Failed to read ${key} from storage:`, e);
+      console.warn(`Failed to read ${key} from localStorage, using fallback:`, e);
     }
     return fallback;
   }
@@ -112,168 +31,10 @@ class ClientDatabase {
     try {
       localStorage.setItem(key, JSON.stringify(data));
     } catch (e) {
-      console.warn(`Failed to write ${key} to storage:`, e);
+      console.warn(`Failed to write ${key} to localStorage:`, e);
     }
   }
 
-  // ==========================================
-  // CITIZEN AUTH METHODS
-  // ==========================================
-  public registerCitizen(payload: {
-    full_name: string;
-    phone_number: string;
-    email?: string;
-    password: string;
-    ward_id?: string;
-  }): { user: User; token: string } {
-    const existing = this.users.find(
-      u => u.phone_number === payload.phone_number || (payload.email && u.email === payload.email)
-    );
-    if (existing) {
-      throw new Error("An account already exists with this mobile number or email.");
-    }
-
-    const newUser: User = {
-      id: `user-cit-${Date.now()}`,
-      full_name: payload.full_name,
-      phone_number: payload.phone_number,
-      email: payload.email,
-      ward_id: payload.ward_id || "ward-64",
-      created_at: new Date().toISOString()
-    };
-
-    this.users.push(newUser);
-    this.saveToStorage("fic_users_list", this.users);
-
-    return {
-      user: newUser,
-      token: `token_cit_${newUser.id}_${Date.now()}`
-    };
-  }
-
-  public loginCitizen(payload: {
-    identifier: string;
-    password: string;
-  }): { user: User; token: string } {
-    const user = this.users.find(
-      u => u.phone_number === payload.identifier || u.email?.toLowerCase() === payload.identifier.toLowerCase()
-    );
-
-    if (!user) {
-      // Auto-provision demo account if tested
-      if (payload.identifier === "9876543210") {
-        return {
-          user: defaultUsers[0],
-          token: `token_cit_${defaultUsers[0].id}_${Date.now()}`
-        };
-      }
-      throw new Error("No citizen account found with these credentials.");
-    }
-
-    return {
-      user,
-      token: `token_cit_${user.id}_${Date.now()}`
-    };
-  }
-
-  // ==========================================
-  // EMPLOYEE AUTH & RBAC METHODS
-  // ==========================================
-  public loginEmployee(payload: {
-    employee_id: string;
-    password: string;
-  }): { employee: Employee; token: string } {
-    const emp = this.employees.find(
-      e => e.employee_id.toUpperCase() === payload.employee_id.toUpperCase()
-    );
-
-    if (!emp) {
-      throw new Error("Invalid Employee ID.");
-    }
-
-    if (emp.is_locked) {
-      throw new Error("Account locked due to excessive failed attempts. Contact Municipal Commissioner.");
-    }
-
-    // Default passwords
-    const valid =
-      payload.password === "Admin@123" ||
-      payload.password === "Officer@123" ||
-      payload.password === "password123";
-
-    if (!valid) {
-      throw new Error("Incorrect password.");
-    }
-
-    // Log login
-    this.logActivity(emp.id, emp.full_name, "EMPLOYEE_LOGIN", `Logged in to role: ${emp.role}`);
-
-    return {
-      employee: emp,
-      token: `token_emp_${emp.id}_${Date.now()}`
-    };
-  }
-
-  public getEmployees(): Employee[] {
-    return this.employees;
-  }
-
-  public createEmployee(payload: Partial<Employee> & { password?: string }): Employee {
-    const newEmp: Employee = {
-      id: `emp-${Date.now()}`,
-      employee_id: payload.employee_id || `MCD-STAFF-${Date.now().toString().slice(-4)}`,
-      full_name: payload.full_name || "New Staff",
-      email: payload.email || "staff@mcd.delhi.gov.in",
-      phone_number: payload.phone_number || "9876500000",
-      role: payload.role || "FIELD_STAFF",
-      designation: payload.designation || "Staff",
-      department_id: payload.department_id || "dept-1",
-      ward_id: payload.ward_id || "ward-64",
-      is_active: true,
-      must_change_password: true,
-      created_at: new Date().toISOString()
-    };
-
-    this.employees.push(newEmp);
-    this.saveToStorage("fic_employees_list", this.employees);
-
-    this.logActivity(
-      "emp-super-1",
-      "Super Admin",
-      "USER_CREATE",
-      `Provisioned account for ${newEmp.full_name} (${newEmp.employee_id}) as ${newEmp.role}`
-    );
-
-    return newEmp;
-  }
-
-  public logActivity(
-    employeeId: string,
-    employeeName: string,
-    action: string,
-    details: string,
-    complaintId?: string
-  ) {
-    const newLog: ActivityLog = {
-      id: `log-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-      employee_id: employeeId,
-      employee_name: employeeName,
-      action,
-      details,
-      complaint_id: complaintId,
-      timestamp: new Date().toISOString()
-    };
-    this.activityLogs.unshift(newLog);
-    this.saveToStorage("fic_activity_logs", this.activityLogs.slice(0, 100));
-  }
-
-  public getActivityLogs(): ActivityLog[] {
-    return this.activityLogs;
-  }
-
-  // ==========================================
-  // METADATA & COMPLAINT METHODS
-  // ==========================================
   public getCategories(): Category[] {
     return this.categories;
   }
@@ -284,6 +45,10 @@ class ClientDatabase {
 
   public getAnnouncements(): Announcement[] {
     return this.announcements;
+  }
+
+  public getOfficers(): User[] {
+    return this.officers;
   }
 
   public createAnnouncement(payload: { title: string; message: string; ward_id?: string; priority?: string }): Announcement {
@@ -306,9 +71,6 @@ class ClientDatabase {
     let list = [...this.complaints];
     if (filters?.status && filters.status !== "ALL") {
       list = list.filter(c => c.status === filters.status);
-    }
-    if (filters?.citizen_id) {
-      list = list.filter(c => c.citizen_id === filters.citizen_id);
     }
     if (filters?.search) {
       const term = filters.search.toLowerCase();
@@ -365,7 +127,7 @@ class ClientDatabase {
 
     const slaHours = category.default_sla_hours || 48;
     const sla_deadline = new Date(Date.now() + 1000 * 60 * 60 * slaHours).toISOString();
-    const assignedEmp = this.employees.find(e => e.role === "JE") || this.employees[2];
+    const assignedOfficer = this.officers[0];
 
     const newTicket: Complaint = {
       id,
@@ -380,18 +142,15 @@ class ClientDatabase {
       ward_id: ward.id,
       ward_name: ward.name_en,
       zone_name: ward.zone_name,
-      assigned_employee_id: assignedEmp ? assignedEmp.id : null,
-      officer_name: assignedEmp ? `${assignedEmp.full_name} (${assignedEmp.designation})` : "Pending Assignment",
-      officer_phone: assignedEmp ? assignedEmp.phone_number : null,
+      assigned_officer_id: assignedOfficer ? assignedOfficer.id : null,
+      officer_name: assignedOfficer ? `${assignedOfficer.full_name} (${assignedOfficer.designation})` : "Pending Assignment",
+      officer_phone: assignedOfficer ? assignedOfficer.phone_number : null,
       title: data.title || "Civic Complaint",
       description: data.description || "",
       latitude: data.latitude || 28.6514,
       longitude: data.longitude || 77.1907,
       address: data.address || `${ward.name_en}, New Delhi`,
-      house_flat_no: data.house_flat_no,
       landmark: data.landmark || "",
-      location_accuracy_meters: data.location_accuracy_meters,
-      location_captured_at: data.location_captured_at || new Date().toISOString(),
       is_anonymous: Boolean(data.is_anonymous),
       status: "ASSIGNED",
       priority: data.priority || "HIGH",
@@ -403,7 +162,7 @@ class ClientDatabase {
       media: data.media || [],
       timeline: [
         { status: "SUBMITTED", timestamp: new Date().toISOString(), remarks: `Lodged with ${slaHours}h SLA` },
-        { status: "ASSIGNED", timestamp: new Date().toISOString(), remarks: `Assigned to ${assignedEmp.full_name}` }
+        { status: "ASSIGNED", timestamp: new Date().toISOString(), remarks: `Assigned to ${assignedOfficer.full_name}` }
       ],
       comments: []
     };
@@ -444,17 +203,6 @@ class ClientDatabase {
     });
 
     this.saveToStorage("fic_complaints", this.complaints);
-
-    // Audit Log
-    const actingEmp = this.employees.find(e => e.id === officer_id) || this.employees[0];
-    this.logActivity(
-      actingEmp.id,
-      actingEmp.full_name,
-      "STATUS_UPDATE",
-      `Updated ${complaint.complaint_number} to ${status}. Remarks: ${remarks || "None"}`,
-      complaint.id
-    );
-
     return complaint;
   }
 
@@ -557,8 +305,9 @@ class ClientDatabase {
     const cleanMsg = message.trim();
     const lower = cleanMsg.toLowerCase();
 
+    // Check for ticket search
     const ticketMatch = cleanMsg.match(/FC-2026-(\d+)/i) || cleanMsg.match(/#?(\d{6})/i);
-    if (ticketMatch || lower.includes("track") || lower.includes("status")) {
+    if (ticketMatch || lower.includes("track") || lower.includes("status") || lower.includes("स्थिति")) {
       const ticket = ticketMatch
         ? this.getComplaintById(ticketMatch[0].startsWith("FC-") ? ticketMatch[0] : `FC-2026-${ticketMatch[1]}`)
         : this.complaints[0];
@@ -573,18 +322,45 @@ class ClientDatabase {
       }
     }
 
-    if (lower.includes("pothole") || lower.includes("garbage") || lower.includes("report")) {
-      let catName = "Garbage & Sanitation";
-      if (lower.includes("pothole") || lower.includes("road")) catName = "Pothole & Road Damage";
+    // Ward & Councillor
+    if (lower.includes("ward") || lower.includes("councillor") || lower.includes("पार्षद") || lower.includes("वार्ड")) {
+      const w = this.wards[0];
       return {
-        text: `I've categorized this under **${catName}**.\n\nPlease state the exact **location, landmark, or street name**:`,
+        text: `🏛️ **Ward 64 (${w.name_en} / ${w.name_hi}):**\n- **Zone:** ${w.zone_name}\n- **Councillor:** ${w.councillor_name}\n- **Phone:** ${w.councillor_phone}\n- **Office:** ${w.office_address}`,
+        action: "WARD_INFO",
+        data: w,
+        quickReplies: ["Report Issue in Ward", "Helpline Numbers", "Main Menu"]
+      };
+    }
+
+    // Issue Filing
+    if (lower.includes("pothole") || lower.includes("garbage") || lower.includes("kachra") || lower.includes("light") || lower.includes("water") || lower.includes("report") || lower.includes("शिकायत")) {
+      let catName = "Garbage & Sanitation";
+      let catId = "cat-1";
+      if (lower.includes("pothole") || lower.includes("road") || lower.includes("gaddha")) {
+        catName = "Pothole & Road Damage";
+        catId = "cat-2";
+      } else if (lower.includes("light") || lower.includes("dark")) {
+        catName = "Streetlight & Poles";
+        catId = "cat-3";
+      }
+
+      // Check duplicate
+      const nearby = this.getNearbyComplaints(28.6514, 77.1907, 500);
+      let duplicateAlert = "";
+      if (nearby.length > 0) {
+        duplicateAlert = `\n\n💡 *Notice:* We found 1 similar open complaint (#${nearby[0].complaint_number}) nearby. You can also upvote it with 'Me Too'.`;
+      }
+
+      return {
+        text: `I've categorized this under **${catName}**.${duplicateAlert}\n\nPlease state the exact **location, landmark, or street name**:`,
         action: "REQUEST_LOCATION",
-        quickReplies: ["Karol Bagh Metro Gate 2", "Rohini Sector 7 Market", "Use Current GPS"]
+        quickReplies: ["Karol Bagh Metro Gate 2", "Rohini Sector 7 Market", "Civil Lines Rajpur Road", "Use Current GPS"]
       };
     }
 
     return {
-      text: "Hello! I am your **Fic City Assistant**.\n\nYou can report civic problems, track complaints, or check municipal SLAs.",
+      text: "Hello! I am your **Fic City Assistant**.\n\nYou can report civic issues (garbage, potholes, streetlights), track existing complaints, or find ward councillor details.",
       action: "GENERAL_GREETING",
       quickReplies: ["Report an Issue", "Track My Complaint", "Find My Ward", "Helpline Numbers"]
     };
